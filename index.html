@@ -89,6 +89,9 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var
 .tk-stat:disabled{opacity:.5;cursor:default}
 .tk-stat i{font-style:normal;color:var(--muted)}
 .tk-stat b{color:var(--c,var(--pass));letter-spacing:-1px;font-weight:700}
+.perk-row{background:color-mix(in srgb,var(--pass) 12%,transparent);border:1px solid var(--pass);border-radius:10px;padding:8px}
+.perk-btn{display:grid;gap:2px;text-align:left;max-width:240px;white-space:normal}
+.perk-btn small{font-weight:500;font-size:11px;opacity:.85}
 .tree-ov{position:absolute;inset:0;z-index:6;background:rgba(10,14,26,.97);border-radius:12px;padding:14px;overflow:auto;display:flex;flex-direction:column;gap:12px}
 .tree-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .tree-head h3{margin:0;font:400 18px var(--display);color:var(--c,var(--pass))}
@@ -1084,6 +1087,8 @@ const ROMAN=n=>{let s='';for(const [v,l] of [[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],
   for(let bt=15;bt<=29;bt++){let nm,n=0;do{nm=pick(BADJ)+' '+pick(BNOUN)}while(names.has(nm)&&++n<40);names.add(nm);TK.CLS['gb'+bt]=genBoss(bt,nm,false)}
   for(const nm of ['Eternal Sovereign','Eternal Wyrm']){names.add(nm);const e=genBoss(30,nm,true);e.drones={max:24,kind:'gunner',rate:.3};e.orbs=14;e.aura={kind:'drain',r:420};e.boss.hp=150000;e.boss.xp=60000;TK.CLS['ge_'+nm.split(' ')[1].toLowerCase()]=e}
   // reverse links for the tier-tree viewer
+  // every laser tank (not bosses) has exactly one laser barrel
+  for(const c of Object.values(TK.CLS))if(c.beam&&c.tier!==4){let seen=false;c.b=c.b.filter(b=>{if(!b.beamer)return true;if(seen)return false;seen=true;return true})}
   TK.PARENTS={};for(const id of Object.keys(TK.CLS))for(const u of TK.CLS[id].up||[])(TK.PARENTS[u]||(TK.PARENTS[u]=[])).push(id);
 }
 function tankGame(st,a,mode,opt={}){
@@ -1155,6 +1160,33 @@ function tankGame(st,a,mode,opt={}){
   }
   // minimap picture of the walls, drawn once
   let miniWalls=null;
+  // each map's arena has its own hazard (bosses are immune)
+  const AFX=sand?({open:'storm',maze:'lava',frontier:'gravity',pillars:'frost',fortress:'wind'})[MAP]||'storm':null;
+  const AFXN={storm:'LIGHTNING STORM',lava:'LAVA PITS',gravity:'GRAVITY WELL',frost:'DEEP FROST',wind:'WHIRLWIND'};
+  let strikes=[],strikeT=1.5;
+  const lava=AFX==='lava'?Array.from({length:6},(_,i)=>({a:i*1.05,d:250+Math.random()*600,r:110+Math.random()*60,dir:Math.random()<.5?1:-1,x:0,y:0})):[];
+  const inArena=k=>Math.hypot(k.x-ARENA.x,k.y-ARENA.y)<ARENA.r;
+  const arenaTick=dt=>{
+    const victims=tanks.filter(k=>!k.dead&&!k.boss);
+    if(AFX==='storm'){strikeT-=dt;if(strikeT<=0){strikeT=.9;const an=Math.random()*6.283,d=Math.sqrt(Math.random())*ARENA.r*.95;strikes.push({x:ARENA.x+Math.cos(an)*d,y:ARENA.y+Math.sin(an)*d,t:.9})}
+      for(const s of strikes){s.t-=dt;if(s.t<=0&&!s.done){s.done=1;bolts.push({pts:[[s.x+(Math.random()-.5)*80,s.y-500],[s.x,s.y]],t:.25});rings.push({x:s.x,y:s.y,r:110,t:.3,d:.3,col:'196,181,253'});
+        for(const k of victims)if(Math.hypot(k.x-s.x,k.y-s.y)<110+R(k))damage(k,maxhp(k)*.15,null)}}
+      strikes=strikes.filter(s=>s.t>-.3)}
+    else if(AFX==='lava'){for(const p of lava){p.a+=dt*.12*p.dir;p.x=ARENA.x+Math.cos(p.a)*p.d;p.y=ARENA.y+Math.sin(p.a)*p.d}
+      for(const k of victims)for(const p of lava)if(Math.hypot(k.x-p.x,k.y-p.y)<p.r){k.burn=Math.max(k.burn,.5);k.burnDps=maxhp(k)*.06;k.burnSrc=null;break}}
+    else if(AFX==='gravity'){for(const k of victims)if(inArena(k)){const dx=ARENA.x-k.x,dy=ARENA.y-k.y,d=Math.hypot(dx,dy)||1;k.x+=dx/d*60*dt;k.y+=dy/d*60*dt}}
+    else if(AFX==='frost'){for(const k of victims)if(inArena(k))k.slow=Math.max(k.slow,.15)}
+    else if(AFX==='wind'){for(const k of victims)if(inArena(k)){const dx=k.x-ARENA.x,dy=k.y-ARENA.y,d=Math.hypot(dx,dy)||1;k.x+=-dy/d*95*dt;k.y+=dx/d*95*dt}}
+  };
+  const drawArenaFx=()=>{
+    if(AFX==='storm'){x.fillStyle='rgba(139,92,246,.05)';x.beginPath();x.arc(ARENA.x,ARENA.y,ARENA.r,0,7);x.fill();
+      for(const s of strikes)if(!s.done){x.strokeStyle=`rgba(248,113,113,${.4+.5*(1-s.t/.9)})`;x.lineWidth=4;x.setLineDash([10,8]);x.beginPath();x.arc(s.x,s.y,110,0,7);x.stroke();x.setLineDash([])}}
+    else if(AFX==='lava'){for(const p of lava){const g=x.createRadialGradient(p.x,p.y,10,p.x,p.y,p.r);g.addColorStop(0,'rgba(254,240,138,.85)');g.addColorStop(.5,'rgba(249,115,22,.7)');g.addColorStop(1,'rgba(185,28,28,.15)');x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r*(1+.04*Math.sin(t*3+p.a)),0,7);x.fill()}}
+    else if(AFX==='gravity'){x.strokeStyle='rgba(168,85,247,.35)';x.lineWidth=4;for(let i=0;i<4;i++){const f=1-((t*.25+i/4)%1);x.beginPath();x.arc(ARENA.x,ARENA.y,ARENA.r*f,0,7);x.stroke()}}
+    else if(AFX==='frost'){x.fillStyle='rgba(186,230,253,.07)';x.beginPath();x.arc(ARENA.x,ARENA.y,ARENA.r,0,7);x.fill();x.fillStyle='rgba(255,255,255,.7)';
+      for(let i=0;i<70;i++){const an=i*2.399,d=((i*137)%1000)/1000*ARENA.r,px=ARENA.x+Math.cos(an)*d+Math.sin(t+i)*20,py=ARENA.y+Math.sin(an)*d+((t*40+i*30)%120)-60;x.fillRect(px,py,3,3)}}
+    else if(AFX==='wind'){x.strokeStyle='rgba(226,232,240,.25)';x.lineWidth=3;for(let i=0;i<10;i++){const rr=200+i*80,a0=t*1.2+i;x.beginPath();x.arc(ARENA.x,ARENA.y,rr,a0,a0+.9);x.stroke()}}
+  };
   // ---- mode objectives
   const domZones=DOM?[{x:WW*.25,y:WH/2},{x:WW/2,y:WH/2},{x:WW*.75,y:WH/2}].map(z=>({...z,r:240,prog:0,owner:0})):[];
   const domPts=[0,0,0],DOMGOAL=240,KOTHGOAL=90;
@@ -1171,6 +1203,14 @@ function tankGame(st,a,mode,opt={}){
     for(const z of domZones){const c=z.owner?tcol(z.owner):'#cbd5e1';x.globalAlpha=.12;x.fillStyle=c;x.beginPath();x.arc(z.x,z.y,z.r,0,7);x.fill();x.globalAlpha=1;x.strokeStyle=c;x.lineWidth=5;x.beginPath();x.arc(z.x,z.y,z.r,0,7);x.stroke();
       if(z.prog){x.strokeStyle=tcol(z.prog>0?1:2);x.lineWidth=12;x.beginPath();x.arc(z.x,z.y,z.r+14,-Math.PI/2,-Math.PI/2+Math.abs(z.prog)*6.283);x.stroke()}
       x.fillStyle='#e2e8f0';x.font=`700 40px ${FONT}`;x.textAlign='center';x.fillText('ABC'[domZones.indexOf(z)],z.x,z.y+14)}};
+  // tier looks: each tier band adds a visual effect around the tank
+  const rankCol=(rk,al)=>rk>=25?`hsla(${(t*120)%360},90%,70%,${al})`:`hsla(${[200,140,50,20,330,280][Math.min(5,Math.floor(rk/5))]},90%,65%,${al})`;
+  const rankFx=(k,r)=>{const rk=rankOf(k);if(rk<3)return;
+    x.strokeStyle=rankCol(rk,.4+(rk>=20?.25*Math.sin(t*6):0));x.lineWidth=rk>=20?5:3;x.beginPath();x.arc(k.x,k.y,r+6,0,7);x.stroke();                       // glow ring (3+), pulsing (20+)
+    if(rk>=6){const n=Math.min(10,Math.floor(rk/3));x.fillStyle=rankCol(rk,.9);for(let i=0;i<n;i++){const an=t*2+i*6.283/n;x.beginPath();x.arc(k.x+Math.cos(an)*(r+15),k.y+Math.sin(an)*(r+15),2.5,0,7);x.fill()}}  // orbiting sparks (6+)
+    if(rk>=15){x.strokeStyle='rgba(253,224,71,.8)';x.lineWidth=3;x.beginPath();for(let i=0;i<5;i++){const an=-Math.PI/2+(i-2)*.28;x.moveTo(k.x+Math.cos(an)*(r+20),k.y+Math.sin(an)*(r+20));x.lineTo(k.x+Math.cos(an)*(r+(i%2?27:33)),k.y+Math.sin(an)*(r+(i%2?27:33)))}x.stroke()}  // crown (15+)
+    if(rk>=30&&Math.random()<.15){x.strokeStyle='#e9d5ff';x.lineWidth=2;x.beginPath();x.moveTo(k.x,k.y);const an=Math.random()*6.283;for(let s=1;s<=4;s++)x.lineTo(k.x+Math.cos(an)*(r+s*10)+(Math.random()-.5)*10,k.y+Math.sin(an)*(r+s*10)+(Math.random()-.5)*10);x.stroke()}  // lightning (30)
+  };
   const drawModeMini=(mx,my,ms,mh)=>{const sx=ms/WW,sy=mh/WH;x.lineWidth=1.5;
     x.strokeStyle='rgba(250,204,21,.6)';x.setLineDash([3,3]);x.beginPath();x.arc(mx+ARENA.x*sx,my+ARENA.y*sy,ARENA.r*sx,0,7);x.stroke();x.setLineDash([]);
     if(ROYALE){x.strokeStyle='#ef4444';x.beginPath();x.arc(mx+zone.x*sx,my+zone.y*sy,zone.r*sx,0,7);x.stroke()}
@@ -1184,6 +1224,9 @@ function tankGame(st,a,mode,opt={}){
     trideca:{hp:12000,xp:15000,r:60,n:13,col:'#14b8a6',dmg:160,minRank:3},tetradeca:{hp:17000,xp:22000,r:64,n:14,col:'#8b5cf6',dmg:170,minRank:5},
     hexadeca:{hp:26000,xp:35000,r:70,n:16,col:'#f59e0b',dmg:180,minRank:7},icosa:{hp:40000,xp:55000,r:76,n:20,col:'#ec4899',dmg:190,minRank:9},
     stargon:{hp:65000,xp:90000,r:84,n:12,col:'#fde047',dmg:200,minRank:12,star:1},prismagon:{hp:100000,xp:150000,r:92,n:32,col:'#ffffff',dmg:220,minRank:15,rainbow:1},
+    crystal:{hp:160000,xp:250000,r:96,n:8,col:'#67e8f9',dmg:230,minRank:18,star:1,inner:.42},sungon:{hp:250000,xp:400000,r:100,n:24,col:'#fbbf24',dmg:240,minRank:20,star:1,inner:.72},
+    voidgon:{hp:400000,xp:650000,r:104,n:40,col:'#1e1b4b',rim:'#a855f7',dmg:250,minRank:22,dark:1},novagon:{hp:650000,xp:1000000,r:110,n:10,col:'#f472b6',dmg:260,minRank:25,star:1,inner:.4,double:1},
+    celestgon:{hp:1000000,xp:1600000,r:116,n:16,col:'#ffffff',dmg:270,minRank:28,star:1,inner:.5,rainbow:1},omnigon:{hp:1600000,xp:3000000,r:130,n:64,col:'#ffffff',dmg:300,minRank:30,rainbow:1,double:1},
     relic:{hp:600,xp:500,r:26,n:6,col:'#ffffff',dmg:40},comet:{hp:300,xp:2000,r:14,n:4,col:'#fde047',dmg:20},
     crasher:{hp:20,xp:15,r:11,n:3,col:'#f472b6',dmg:120},sentry:{hp:1500,xp:1500,r:34,n:8,col:'#94a3b8',dmg:60},
     orb:{hp:60,xp:50,r:12,n:12,col:'#4ade80',dmg:0},vault:{hp:2500,xp:1500,r:40,n:4,col:'#b45309',dmg:80},volatile:{hp:200,xp:150,r:24,n:6,col:'#e11d48',dmg:60},
@@ -1213,15 +1256,25 @@ function tankGame(st,a,mode,opt={}){
   // ---- stats and classes (sandbox stats have no cap, so speed-type stats level off instead of growing forever)
   const soft=(s,max,k)=>max*(1-1/(1+s*k));
   const bf=(k,key)=>k.buff?k.buff[key]:1;
+  // ---- perks (Overdrive): at tiers 5, 10, 15, 20, 25 and 30 you pick one of three; they last for the rest of the match
+  const PERKS={shield:['Energy shield','A shield worth 30% of your health absorbs damage and refills after 4 seconds out of combat'],titan:['Titan size','30% bigger, 40% more health, 20% more body damage'],
+    overclock:['Overclock','25% faster reload'],vamp:['Vampiric','Heal 10% of all damage you deal'],swift:['Swift','20% faster movement'],sharp:['Sharpshooter','30% faster, longer-range bullets'],
+    phoenix:['Phoenix','Once per life, come back at half health instead of dying'],glass:['Glass cannon','40% more damage, 15% less health'],escort:['Drone escort','Four gun drones follow you everywhere'],
+    regenP:['Regeneration','Double health regen'],critP:['Eagle eye','15% of shots deal double damage'],spikes:['Spiked armor','Attackers take 20% of their damage back']};
+  const PERK_TIERS=[5,10,15,20,25,30];
+  const hasP=(k,p)=>sand&&!!k.perks&&k.perks.includes(p);
+  const perkPending=k=>sand&&!k.boss?PERK_TIERS.filter(tr=>(k.maxRank||1)>=tr).length-(k.perks||[]).length:0;
+  const perkOffer=k=>{if(!k.offer||!k.offer.length){const free=Object.keys(PERKS).filter(p=>!(k.perks||[]).includes(p));k.offer=shuffle(free).slice(0,3)}return k.offer};
+  const takePerk=(k,p)=>{(k.perks||(k.perks=[])).push(p);k.offer=null;if(p==='shield')k.shieldHp=maxhp(k)*.3;if(p==='titan')k.hp=Math.min(maxhp(k),k.hp*1.4)};
   const rankOf=k=>TK.CLS[k.cls].rank||1;
-  const maxhp=k=>k.boss?k.mhp:(100+k.level*3+k.stats[1]*25)*bf(k,'hp')*(TK.CLS[k.cls].hpMul||1)*xpScale(k);
-  const R=k=>k.boss?k.boss.r:(22+k.level*.3)*(1+.04*(rankOf(k)-1))*(1+(xpScale(k)-1)*.6);
-  const rl=k=>(sand?Math.max(.04,.6*Math.pow(.93,k.stats[5])):.6*(1-k.stats[5]*.075))/bf(k,'rl')/(k.rage>0?2:1)/(low(k)?1.4:1);
-  const spd=k=>((sand?205*(1+soft(k.stats[6],1.6,.06)):205*(1+k.stats[6]*.07))-k.level*1.2)*(TK.CLS[k.cls].speed||1)*bf(k,'spd')*(k.haste>0?1.8:1)*(low(k)?1.4:1);
-  const bspd=k=>sand?420*(1+soft(k.stats[3],1.8,.07)):420*(1+k.stats[3]*.09);
+  const maxhp=k=>k.boss?k.mhp:(100+k.level*3+k.stats[1]*25)*bf(k,'hp')*(TK.CLS[k.cls].hpMul||1)*xpScale(k)*(hasP(k,'titan')?1.4:1)*(hasP(k,'glass')?.85:1);
+  const R=k=>k.boss?k.boss.r:(22+k.level*.3)*(1+.04*(rankOf(k)-1))*(1+(xpScale(k)-1)*.6)*(hasP(k,'titan')?1.3:1);
+  const rl=k=>(sand?Math.max(.04,.6*Math.pow(.93,k.stats[5])):.6*(1-k.stats[5]*.075))/bf(k,'rl')/(k.rage>0?2:1)/(low(k)?1.4:1)/(hasP(k,'overclock')?1.25:1);
+  const spd=k=>((sand?205*(1+soft(k.stats[6],1.6,.06)):205*(1+k.stats[6]*.07))-k.level*1.2)*(TK.CLS[k.cls].speed||1)*bf(k,'spd')*(k.haste>0?1.8:1)*(low(k)?1.4:1)*(hasP(k,'swift')?1.2:1);
+  const bspd=k=>(sand?420*(1+soft(k.stats[3],1.8,.07)):420*(1+k.stats[3]*.09))*(hasP(k,'sharp')?1.3:1);
   const mom=k=>P(k,'momentum')?1+Math.min(1,Math.hypot(k.vx,k.vy)/300)*.5:1;
-  const bdmg=k=>8*(1+k.stats[4]*.16)*bf(k,'dmg')*(TK.CLS[k.cls].dmgMul||1)*xpScale(k)*(k.rage>0?1.2:1)*(P(k,'berserk')?1+(1-clamp(k.hp/maxhp(k),0,1))*.6:1)*mom(k);
-  const body=k=>(12+k.stats[2]*7)*(TK.CLS[k.cls].bodyMul||1)*(k.charging>0?3:1)*mom(k);
+  const bdmg=k=>8*(1+k.stats[4]*.16)*bf(k,'dmg')*(hasP(k,'glass')?1.4:1)*(TK.CLS[k.cls].dmgMul||1)*xpScale(k)*(k.rage>0?1.2:1)*(P(k,'berserk')?1+(1-clamp(k.hp/maxhp(k),0,1))*.6:1)*mom(k);
+  const body=k=>(12+k.stats[2]*7)*(TK.CLS[k.cls].bodyMul||1)*(k.charging>0?3:1)*mom(k)*(hasP(k,'titan')?1.2:1);
   const tcol=team=>team===99||(BOSS&&team===2)?'#f59e0b':TEAMS>1?TEAMC[(team-1)%4]:team===me.team?BLUE:RED;
   const col=k=>k.boss?k.boss.col:BOSS?tcol(k.team):siege?(k.team===1?BLUE:RED):TEAMS>1?TEAMC[(k.team-1)%4]:(k===me?BLUE:RED);
   const barrels=k=>{
@@ -1259,15 +1312,16 @@ function tankGame(st,a,mode,opt={}){
     k.vx=k.vy=0;
   };
   const mk=o=>{const k={kind:'tank',id:nid++,x:0,y:0,vx:0,vy:0,a:0,team:0,cls:'scout',level:1,xp:0,score:0,stats:[0,0,0,0,0,0,0,0,0,0,0,0],hp:0,cool:[],bot:false,name:'',dead:false,respawn:0,calm:0,lastHit:null,kills:0,think:0,tgt:null,orb:Math.random()<.5?1:-1,skill:.5,slow:0,burn:0,acd:0,dcd:0,dn:0,safe:3,buff:{dmg:1,hp:1,spd:1,rl:1,regen:1},...o};setCls(k,k.cls);return k};
-  const freshBot=k=>{k.buff={dmg:1,hp:1,spd:1,rl:1,regen:1};k.xp=0;k.level=1;k.score=0;k.stats=[0,0,0,0,0,0,0,0,0,0,0,0];setCls(k,'scout');gain(k,sand?TK.need(29):Math.floor(Math.random()*TK.need(rnd(siege?4:9))));if(sand&&Math.random()<.6)setCls(k,MAGIC[rnd(MAGIC.length)]);k.txp=0;k.hp=maxhp(k)};
+  const freshBot=k=>{k.buff={dmg:1,hp:1,spd:1,rl:1,regen:1};k.perks=[];k.maxRank=1;k.offer=null;k.xp=0;k.level=1;k.score=0;k.stats=[0,0,0,0,0,0,0,0,0,0,0,0];setCls(k,'scout');gain(k,sand?TK.need(29):Math.floor(Math.random()*TK.need(rnd(siege?4:9))));if(sand&&Math.random()<.6)setCls(k,MAGIC[rnd(MAGIC.length)]);k.txp=0;k.hp=maxhp(k)};
   // tier progress: XP earned this life (Overdrive starts everyone at level 30, so that start does not count)
   const nextNeed=k=>TK.TIERXP[rankOf(k)+1];
   const canTier=k=>sand&&!!TK.CLS[k.cls].up&&rankOf(k)<TK.MAXRANK&&(k.txp||0)>=nextNeed(k);
   // ---- world setup
   const NORMALP=new Set(['sq','tri','pent','hex','hept','oct','non','dec','hend','dodec']);
-  const PLAIN=new Set([...NORMALP,'alpha','trideca','tetradeca','hexadeca','icosa','stargon','prismagon']);
+  const PLAIN=new Set([...NORMALP,'alpha','trideca','tetradeca','hexadeca','icosa','stargon','prismagon','crystal','sungon','voidgon','novagon','celestgon','omnigon']);
   const TIERGONS=[{id:'trideca',label:'Tridecagons (13 sides)',cap:3},{id:'tetradeca',label:'Tetradecagons (14 sides)',cap:3},{id:'hexadeca',label:'Hexadecagons (16 sides)',cap:2},
-    {id:'icosa',label:'Icosagons (20 sides)',cap:2},{id:'stargon',label:'Star polygons',cap:1},{id:'prismagon',label:'Prismagons',cap:1}],gonSeen=new Set();let gonT=3;
+    {id:'icosa',label:'Icosagons (20 sides)',cap:2},{id:'stargon',label:'Star polygons',cap:1},{id:'prismagon',label:'Prismagons',cap:1},
+    {id:'crystal',label:'Crystal stars',cap:1},{id:'sungon',label:'Sun polygons',cap:1},{id:'voidgon',label:'Void polygons',cap:1},{id:'novagon',label:'Nova stars',cap:1},{id:'celestgon',label:'Celestial stars',cap:1},{id:'omnigon',label:'The Omnigon',cap:1}],gonSeen=new Set();let gonT=3;
   const addShape=()=>{
     const r=Math.random();let type=r<.62?'sq':r<.9?'tri':'pent',X,Y;
     if(sand){const SPAWN=[['sq',.46],['tri',.68],['pent',.8],['hex',.87],['hept',.915],['oct',.945],['non',.965],['dec',.98],['hend',.991],['dodec',1]];type=SPAWN.find(([,p])=>r<p)[0]}
@@ -1321,9 +1375,12 @@ function tankGame(st,a,mode,opt={}){
     const st=src&&src.kind==='tank'&&src!==o;
     if(st&&o.boss&&P(src,'giantslayer'))n*=2;
     if(P(o,'ironskin'))n*=.75;
+    if(hasP(o,'shield')&&o.shieldHp>0){const ab=Math.min(o.shieldHp,n);o.shieldHp-=ab;n-=ab;o.calm=0;if(n<=0)return}
     if(sand&&o.kind==='tank'&&sv(o,10))n*=1-soft(sv(o,10),.6,.04);
     o.hp-=n;o.calm=0;if(src)o.lastHit=src;if(o.boss&&src&&src.kind==='tank')o.dmgBy.set(src,(o.dmgBy.get(src)||0)+n);
-    if(st){if(P(src,'lifesteal')&&!src.dead)src.hp=Math.min(maxhp(src),src.hp+n*.15);if(!noThorns&&P(o,'thorns'))damage(src,n*.3,o,true)}
+    if(st){if(P(src,'lifesteal')&&!src.dead)src.hp=Math.min(maxhp(src),src.hp+n*.15);if(hasP(src,'vamp')&&!src.dead)src.hp=Math.min(maxhp(src),src.hp+n*.1);
+      if(!noThorns&&P(o,'thorns'))damage(src,n*.3,o,true);if(!noThorns&&hasP(o,'spikes'))damage(src,n*.2,o,true)}
+    if(o.hp<=0&&hasP(o,'phoenix')&&!o.phxUsed){o.phxUsed=1;o.hp=maxhp(o)*.5;o.safe=t+2;SP.burst(fx,o.x,o.y,'#fb923c',50,260);if(o===me)say('Phoenix! Back at half health');return}
     if(o.hp<=0){if(P(o,'secondwind')&&!o.swUsed){o.swUsed=1;o.hp=maxhp(o)*.3;o.safe=t+2;SP.burst(fx,o.x,o.y,'#fde68a',30,200);if(o===me)say('Second wind!')}else kill(o)}
   };
   // bosses always appear in the central arena; their size grows with tier, up to a quarter of the arena for the Eternals
@@ -1354,7 +1411,7 @@ function tankGame(st,a,mode,opt={}){
     for(const o of tanks)if(!o.dead&&Math.hypot(o.x-s.x,o.y-s.y)<rad+R(o))damage(o,dm,null);
     for(const o of shapes)if(o!==s&&o.hp>0&&Math.hypot(o.x-s.x,o.y-s.y)<rad+o.r)hitShape(o,dm*2,null)};
   const hitShape=(s,n,src)=>{if(s.hp<=0)return;s.hp-=n;s.hit=.08;if(s.hp<=0){if(src&&src.kind==='tank'&&!src.dead){gain(src,SH[s.type].xp);claim(s,src);if(P(src,'scavenger')){const sm=maxhp(src);src.hp=Math.min(sm,src.hp+sm*.05)}const D=TK.CLS[src.cls].drones;if(D&&D.conj&&src.dn<droneCap(src))addDrone(src,s.x,s.y,0,'square')}SP.burst(fx,s.x,s.y,SH[s.type].col,8,120);if(s.type==='volatile')volatileBoom(s)}};
-  const revive=k=>{if(!siege&&k.bot)freshBot(k);k.dead=false;k.hp=maxhp(k);k.lastHit=null;k.calm=0;k.tgt=null;k.slow=k.burn=k.pT=k.pst=k.stun=k.mark=k.swUsed=0;k.safe=t+2.5;place(k)};
+  const revive=k=>{if(!siege&&k.bot)freshBot(k);k.dead=false;k.hp=maxhp(k);k.lastHit=null;k.calm=0;k.tgt=null;k.slow=k.burn=k.pT=k.pst=k.stun=k.mark=k.swUsed=k.phxUsed=0;if(hasP(k,'shield'))k.shieldHp=maxhp(k)*.3;k.safe=t+2.5;place(k)};
   // special bullets: explosions and one-jump lightning
   const boom=b=>{b.boomed=1;const rad=70+b.r*2;rings.push({x:b.x,y:b.y,r:rad,t:.3,d:.3,col:'251,146,60'});
     for(const o of tanks)if(!o.dead&&o.team!==b.team&&Math.hypot(o.x-b.x,o.y-b.y)<rad+R(o))damage(o,b.dmg*1.1,b.owner);
@@ -1418,18 +1475,43 @@ function tankGame(st,a,mode,opt={}){
       k.acd=5}
     else{wells.push({x:tx,y:ty,team:k.team,owner:k,t:4,r:230});k.acd=8}
   };
-  // beam tanks: every beam barrel (extra barrels included) fires its own beam at the first thing in its path
+  // first wall a ray meets, with the side it hit (for bouncing beams)
+  const rayWall=(sx,sy,dx,dy,max)=>{let best=max,nx=0,ny=0;
+    for(const w of walls){const th=rayBox(sx,sy,dx,dy,w);if(th===null||th>=best)continue;best=th;const hx=sx+dx*th,hy=sy+dy*th,dl=Math.abs(hx-w.x),dr=Math.abs(hx-w.x-w.w),dtp=Math.abs(hy-w.y),dbt=Math.abs(hy-w.y-w.h),m=Math.min(dl,dr,dtp,dbt);
+      if(m===dl||m===dr){nx=1;ny=0}else{nx=0;ny=1}}
+    return{t:best,nx,ny}};
+  // laser tanks fire ONE beam. Higher tiers add effects and damage: sparks (tier 2+), burning (4+), a chain spark (6+),
+  // bouncing off walls (8+, twice from 12+), slowing (10+), piercing a second target (15+), blasts (20+), prismatic colors (25+)
   const beam=(k,dt)=>{
-    const C=TK.CLS[k.cls],r=R(k);k.beams=[];
-    for(const b of barrels(k)){
-      if(!b.beamer)continue;
-      const ang=k.a+b.a,ca=Math.cos(ang),sa=Math.sin(ang),ly=(b.y||0)*r,sx=k.x+ca*r*b.len-sa*ly,sy=k.y+sa*r*b.len+ca*ly,bp=sv(k,7);let best=null,bt=C.beam.range*(1+bp*.05);
-      for(const w of walls){const th=rayBox(sx,sy,ca,sa,w);if(th!==null&&th<bt)bt=th}
-      const test=(o,rad)=>{const px=o.x-sx,py=o.y-sy,along=px*ca+py*sa;if(along<0||along>bt)return;if(Math.abs(px*sa-py*ca)<rad+bp*2){bt=along;best=o}};
-      for(const o of tanks)if(!o.dead&&o.team!==k.team)test(o,R(o));
-      for(const s of shapes)if(s.hp>0)test(s,s.r);
-      k.beams.push([sx,sy,ca,sa,bt]);
-      if(best){const dm=bdmg(k)*C.beam.dps*(k.focus>0?3:1)*(1+sv(k,7)*.6)*dt;if(best.kind==='tank')damage(best,dm,k);else hitShape(best,dm,k)}
+    const C=TK.CLS[k.cls],r=R(k),rk=k.boss?(k.btier||1):rankOf(k),bp=sv(k,7);k.beams=[];
+    const all=barrels(k).filter(b=>b.beamer),use=k.boss?all:all.slice(0,1);
+    // extra barrel points power the beam with diminishing returns (about x2.9 at 4 points, x7 at 28), so high-tier limits stay sane
+    const bounces=rk>=12?2:rk>=8?1:0,pierce=rk>=15?2:1,width=Math.min(30,bp*1.2)+(rk>=25?6:rk>=10?3:0);
+    const dps=bdmg(k)*C.beam.dps*(k.focus>0?3:1)*(1+soft(bp,10,.06))*(1+(rk-1)*.1);
+    for(const b of use){
+      const ang=k.a+b.a,ly=(b.y||0)*r;let ca=Math.cos(ang),sa=Math.sin(ang),sx=k.x+ca*r*b.len-sa*ly,sy=k.y+sa*r*b.len+ca*ly,left=C.beam.range*(1+soft(bp,1.2,.05))*(1+(rk-1)*.02),bnc=0;
+      const segs=[],hits=[];
+      while(left>1){
+        const wh=rayWall(sx,sy,ca,sa,left),hitWall=wh.t<left-1e-6;let end=wh.t,stop=false;
+        const found=[],test=(o,rad)=>{const px=o.x-sx,py=o.y-sy,al=px*ca+py*sa;if(al<0||al>end)return;if(Math.abs(px*sa-py*ca)<rad+width)found.push([al,o])};
+        for(const o of tanks)if(!o.dead&&o.team!==k.team)test(o,R(o));
+        for(const s of shapes)if(s.hp>0)test(s,s.r);
+        found.sort((p,q)=>p[0]-q[0]);
+        for(const [al,o] of found){if(hits.some(h=>h[0]===o))continue;hits.push([o,sx+ca*al,sy+sa*al]);if(hits.length>=pierce){end=al;stop=true;break}}
+        segs.push([sx,sy,sx+ca*end,sy+sa*end]);left-=end;
+        if(stop||!hitWall||bnc>=bounces)break;
+        bnc++;sx+=ca*end;sy+=sa*end;if(wh.nx)ca=-ca;if(wh.ny)sa=-sa;sx+=ca*3;sy+=sa*3;
+        SP.burst(fx,sx,sy,'#fde68a',1,140);
+      }
+      k.beams.push(segs);
+      hits.forEach(([o,hx,hy],i)=>{
+        const dm=dps*dt*(i?.6:1);if(o.kind==='tank')damage(o,dm,k);else hitShape(o,dm,k);
+        if(o.kind==='tank'){if(rk>=4){o.burn=Math.max(o.burn,.4);o.burnDps=dps*.15;o.burnSrc=k}if(rk>=10)o.slow=Math.max(o.slow,.2)}
+        if(rk>=2&&Math.random()<.6)fx.push({x:hx,y:hy,vx:(Math.random()-.5)*280,vy:(Math.random()-.5)*280,life:.3,t:0,col:rk>=25?`hsl(${Math.floor(Math.random()*360)} 90% 70%)`:'#fde68a'});
+        if(rk>=4&&Math.random()<.35)fx.push({x:hx,y:hy,vx:(Math.random()-.5)*60,vy:-60-Math.random()*60,life:.5,t:0,col:'#fb923c'});
+        if(i===0&&rk>=6){k.chainT=(k.chainT||0)-dt;if(k.chainT<=0){k.chainT=.4;chainFrom(o,{team:k.team,owner:k,dmg:dps*.5})}}
+        if(i===0&&rk>=20){k.blastT=(k.blastT||0)-dt;if(k.blastT<=0){k.blastT=1;boom({x:hx,y:hy,r:30,dmg:dps*1.5,team:k.team,owner:k})}}
+      });
     }
   };
   const fire=(k,dt,want)=>{
@@ -1443,17 +1525,18 @@ function tankGame(st,a,mode,opt={}){
       let ef=b.eff||C.eff;if(ef==='random')ef=RANDE[rnd(RANDE.length)];
       const ba=k.a+b.a,ca=Math.cos(ba),sa=Math.sin(ba),ly=(b.y||0)*r;
       for(let q=0;q<(b.pellets||1);q++){
+      // each tank has a live-bullet budget; when it is full, new shots are skipped instead of deleting old far-flying ones
+      if((k.bn||0)>=(k===me?700:k.boss?450:260)||bullets.length>=3800)break;k.bn=(k.bn||0)+1;
       // fire weapons shoot flames (short, growing, piercing puffs); swirl weapons send projectiles spiralling around the tank
       const flame=ef==='burn',swirl=ef==='swirl';
-      const ang=ba+(b.spread?(Math.random()-.5)*b.spread:0)+(flame?(Math.random()-.5)*.25:0),sp=bspd(k)*(b.spd||1)*(b.pellets?.8+Math.random()*.4:1)*(flame?.75:1),crit=P(k,'crit')&&Math.random()<.2;
+      const ang=ba+(b.spread?(Math.random()-.5)*b.spread:0)+(flame?(Math.random()-.5)*.25:0),sp=bspd(k)*(b.spd||1)*(b.pellets?.8+Math.random()*.4:1)*(flame?.75:1),crit=(P(k,'crit')&&Math.random()<.2)||(hasP(k,'critP')&&Math.random()<.15);
       const br=r*b.w*.42*(b.size||1)*(crit?1.3:1)*(flame?1.15:1);
       bullets.push({crit,ns:P(k,'ghostshot')?1:0,x:k.x+ca*r*b.len-sa*ly,y:k.y+sa*r*b.len+ca*ly,vx:Math.cos(ang)*sp+k.vx*.2,vy:Math.sin(ang)*sp+k.vy*.2,r:br,r0:br,dmg:bdmg(k)*(b.dmg||1)*(crit?2.5:1),team:k.team,owner:k,t:0,
-        life:(b.trap?8:ef==='orbit'?4:swirl?3:ef==='boomerang'?2.4:flame?.55:1.4*(b.life||1))*(1+soft(sv(k,8),1.2,.06)),eff:ef,fric:b.trap?1:0,flame:flame?1:0,star:b.star||C.star?1:0,
+        life:(b.trap?8:ef==='orbit'?4:swirl?3:ef==='boomerang'?2.4:flame?.55:1.4*(b.life||1))*(1+soft(sv(k,8),1.2,.06))*(hasP(k,'sharp')&&!swirl&&!b.trap?1.3:1),eff:ef,fric:b.trap?1:0,flame:flame?1:0,star:b.star||C.star?1:0,
         pierce:flame?99:(b.pierce||({boomerang:6,orbit:2,swirl:3,wave:1}[ef]||0))+Math.floor(sv(k,9)/6),oa:ba,or:swirl?r*b.len:r+55,a0:ang,ph:0,sp});
       }
       const rec=14*(b.recoil||1)*(b.thrust?4:1)/(sand&&!b.thrust?1+(k.stats[7]||0)*.3:1);if(!k.boss){k.vx-=ca*rec;k.vy-=sa*rec}
     });
-    if(bullets.length>1500)bullets.splice(0,bullets.length-1500);
   };
   const valid=T=>!!T&&(T.kind==='tank'?!T.dead:T.kind==='pt'?true:T.hp>0);
   const bossBrain=(k,dt)=>{
@@ -1596,12 +1679,16 @@ function tankGame(st,a,mode,opt={}){
   const passEl=document.createElement('div');passEl.className='tk-pts';passEl.style.gridColumn='1/-1';passEl.hidden=!sand;panel.appendChild(passEl);
   const clsRow=document.createElement('div');clsRow.className='row';clsRow.hidden=true;
   const upRow=document.createElement('div');upRow.className='row';upRow.hidden=true;
-  st.append(upRow,clsRow,panel);
+  const perkRow=document.createElement('div');perkRow.className='row perk-row';perkRow.hidden=true;
+  st.append(perkRow,upRow,clsRow,panel);
   let sig='';
   const syncPanel=()=>{
     const PC=TK.CLS[me.cls],pow=PC.ability?`${POWN[PC.ability]} ${me.acd>0?Math.ceil(me.acd)+'s':'ready'}`:'none';
-    const rk=rankOf(me),ready=canTier(me),need=nextNeed(me),txpB=Math.floor((me.txp||0)/250);
-    const p=points(me),ch=choices(me),s=[p,me.stats.join(),ch.join(),auto,autoMax,me.cls,pow,rk,ready,ready?0:txpB].join('|');if(s===sig)return;sig=s;
+    const rk=rankOf(me),ready=canTier(me),need=nextNeed(me),txpB=Math.floor((me.txp||0)/250),pend=perkPending(me),perkSig=pend+':'+(me.perks||[]).join(',');
+    if(perkRow._sig!==perkSig){perkRow._sig=perkSig;perkRow.innerHTML='';perkRow.hidden=!(sand&&pend>0);
+      if(sand&&pend>0){const l=document.createElement('span');l.textContent=`Perk unlocked (tier ${PERK_TIERS[(me.perks||[]).length]}): pick one`;perkRow.append(l);
+        perkOffer(me).forEach(p=>{const b=document.createElement('button');b.className='btn primary perk-btn';b.innerHTML=`<b>${PERKS[p][0]}</b><small>${PERKS[p][1]}</small>`;b.onclick=()=>{takePerk(me,p);say(`Perk: ${PERKS[p][0]}`)};perkRow.append(b)})}}
+    const p=points(me),ch=choices(me),s=[p,me.stats.join(),ch.join(),auto,autoMax,me.cls,pow,rk,ready,ready?0:txpB,perkSig].join('|');if(s===sig)return;sig=s;
     upRow.innerHTML='';upRow.hidden=!sand;
     if(sand){
       const l=document.createElement('span');
@@ -1614,7 +1701,7 @@ function tankGame(st,a,mode,opt={}){
       if(rk>1){const back=document.createElement('button');back.className='btn';back.textContent='Back to tier 1';back.onclick=()=>{setCls(me,'scout');say('Back to tier 1 tanks. Your XP is kept')};upRow.append(back)}
     }
     powBtn.innerHTML=`<span><i>Q</i> Power</span><b>${pow.toUpperCase()}</b>`;powBtn.disabled=!PC.ability;
-    passEl.textContent=PC.passive?`Passive · ${TK.PASSIVES[PC.passive]}`:'No passive';
+    passEl.textContent=(PC.passive?`Passive · ${TK.PASSIVES[PC.passive]}`:'No passive')+((me.perks||[]).length?`   ·   Perks: ${me.perks.map(p=>PERKS[p][0]).join(', ')}`:'');
     ptsEl.textContent=sand?`Free upgrades up to your tier's limits (keys 1-9, 0, -, =; Shift +10)`:p>0?`${p} upgrade point${p===1?'':'s'} (keys 1-7)`:`Level up to earn points`;
     statBtns.forEach((b,i)=>{const cap=capOf(me,i);b.innerHTML=`<span><i>${KEYLAB[i]}</i> ${STATS[i]}</span><b>${sand?`${sv(me,i)}/${cap}`:'■'.repeat(me.stats[i])+'□'.repeat(7-me.stats[i])}</b>`;b.disabled=sv(me,i)>=cap||(!sand&&p<=0)});
     autoBtn.innerHTML=`<span><i>E</i> Auto-fire</span><b>${auto?'ON':'OFF'}</b>`;
@@ -1637,8 +1724,11 @@ function tankGame(st,a,mode,opt={}){
       if(z.prog>=1)z.owner=1;else if(z.prog<=-1)z.owner=2;else if((z.owner===1&&z.prog<=0)||(z.owner===2&&z.prog>=0))z.owner=0;
       if(z.owner)domPts[z.owner]+=dt}
     if(KOTH){const inHill=contenders().filter(k=>Math.hypot(k.x-hill.x,k.y-hill.y)<hill.r);hill.contested=inHill.length>1;hill.king=inHill.length===1?inHill[0]:null;if(hill.king)hill.king.hold=(hill.king.hold||0)+dt}
+    if(sand)arenaTick(dt);
     if(ROYALE){zone.r=Math.max(zone.min,zone.r0-(zone.r0-zone.min)*Math.min(1,t/zone.time));for(const k of tanks)if(!k.dead&&!k.boss&&Math.hypot(k.x-zone.x,k.y-zone.y)>zone.r)damage(k,maxhp(k)*.07*dt,null)}
-    if(sand&&Math.floor(t)!==Math.floor(t-dt))tanks.forEach(k=>{if(!k.bot||k.dead||k.boss||k.decoy)return;if(canTier(k)){const u=TK.CLS[k.cls].up;setCls(k,u[rnd(u.length)])}botLevelUp(k)});
+    if(sand){me.maxRank=Math.max(me.maxRank||1,rankOf(me))}
+    if(sand&&Math.floor(t)!==Math.floor(t-dt))tanks.forEach(k=>{if(!k.bot||k.dead||k.boss||k.decoy)return;if(canTier(k)){const u=TK.CLS[k.cls].up;setCls(k,u[rnd(u.length)])}botLevelUp(k);
+      k.maxRank=Math.max(k.maxRank||1,rankOf(k));while(perkPending(k)>0){const o=perkOffer(k);takePerk(k,o[rnd(o.length)])}});
     if(sand){
       const bossAlive=tanks.some(k=>k.boss&&!k.dead);
       // boss fight: every two waves the boss tier goes up, reaching The Eternal at wave 19
@@ -1680,7 +1770,7 @@ function tankGame(st,a,mode,opt={}){
       me.aimX=tgt?tgt.x:me.x+Math.cos(me.a)*300;me.aimY=tgt?tgt.y:me.y+Math.sin(me.a)*300;
       want=io.firing()||auto||(!!io.touch&&!!tgt);
     }
-    tanks.forEach(k=>k.dn=0);drones.forEach(d=>d.owner.dn++);
+    tanks.forEach(k=>k.dn=0);drones.forEach(d=>{if(!d.escort)d.owner.dn++});
     for(const k of tanks){
       if(k.dead){if(k.respawn>0){k.respawn-=dt;if(k.respawn<=0)revive(k)}continue}
       if(k.burn>0){k.burn-=dt;damage(k,k.burnDps*dt,k.burnSrc);if(Math.random()<.3)fx.push({x:k.x+(Math.random()-.5)*R(k),y:k.y+(Math.random()-.5)*R(k),vx:0,vy:-40,life:.5,t:0,col:'#fb923c'});if(k.dead)continue}
@@ -1693,6 +1783,8 @@ function tankGame(st,a,mode,opt={}){
       if(k.detour>0){k.detour-=dt;m={x:-m.y*k.detourDir,y:m.x*k.detourDir}}
       const KC=TK.CLS[k.cls];
       if(KC.zap){k.zcd=(k.zcd||0)-dt;if(w&&k.zcd<=0&&zap(k))k.zcd=KC.zap.rate*rl(k)/.6}
+      // tanks from tier 10 leave a glowing trail when moving
+      if(sand&&!k.boss&&rankOf(k)>=10&&fx.length<2500&&Math.hypot(k.vx,k.vy)>60&&Math.random()<.45)fx.push({x:k.x-k.vx*.05+(Math.random()-.5)*R(k),y:k.y-k.vy*.05+(Math.random()-.5)*R(k),vx:-k.vx*.2,vy:-k.vy*.2,life:.6,t:0,col:rankCol(rankOf(k),.9)});
       if(KC.ability==='rewind'){k.histT=(k.histT||0)-dt;if(k.histT<=0){k.histT=.1;(k.hist||(k.hist=[])).push({x:k.x,y:k.y,hp:k.hp});if(k.hist.length>30)k.hist.shift()}}
       if(KC.mines){k.mineT=(k.mineT||0)-dt;if(k.mineT<=0&&Math.hypot(k.vx,k.vy)>40){k.mineT=KC.mines*rl(k)/.6;const ba=Math.atan2(k.vy,k.vx)+Math.PI;
         bullets.push({x:k.x+Math.cos(ba)*R(k)*1.2,y:k.y+Math.sin(ba)*R(k)*1.2,vx:0,vy:0,r:12,dmg:bdmg(k)*2*(1+(k.stats[7]||0)*.25),team:k.team,owner:k,t:0,life:6,eff:'explode',fric:1,pierce:0})}}
@@ -1720,7 +1812,9 @@ function tankGame(st,a,mode,opt={}){
       if(walls.length){pushOut(k,r);
         if(k.bot&&!k.boss){const want=Math.hypot(m.x,m.y)*S*dt,moved=Math.hypot(k.x-px0,k.y-py0);
           if(want>0&&moved<want*.35){k.stuckT=(k.stuckT||0)+dt;if(k.stuckT>.25){k.stuckT=0;k.detour=.6+Math.random()*.6;k.detourDir=Math.random()<.5?1:-1}}else k.stuckT=0}}
-      k.calm+=dt;const mh=maxhp(k);if(!k.boss)k.hp=Math.min(mh,k.hp+mh*(.006+(sand?soft(k.stats[0],.2,.04):k.stats[0]*.005))*(k.calm>6?3:1)*bf(k,'regen')*(P(k,'regen')?3:1)*dt);
+      k.calm+=dt;const mh=maxhp(k);if(!k.boss)k.hp=Math.min(mh,k.hp+mh*(.006+(sand?soft(k.stats[0],.2,.04):k.stats[0]*.005))*(k.calm>6?3:1)*bf(k,'regen')*(P(k,'regen')?3:1)*(hasP(k,'regenP')?2:1)*dt);
+      if(hasP(k,'shield')&&k.calm>4){const sm=maxhp(k)*.3;k.shieldHp=Math.min(sm,(k.shieldHp||0)+sm*.3*dt)}
+      if(hasP(k,'escort')){let n=0;for(const d of drones)if(d.owner===k&&d.escort)n++;for(;n<4&&drones.length<400;n++){const an=Math.random()*6.283;addDrone(k,k.x+Math.cos(an)*R(k),k.y+Math.sin(an)*R(k),an,'gunner');drones[drones.length-1].escort=1}}
       if(P(k,'static')){k.stT=(k.stT||0)-dt;if(k.stT<=0){let best=null,bd=260;for(const o of tanks)if(!o.dead&&o.team!==k.team){const d=Math.hypot(o.x-k.x,o.y-k.y);if(d<bd){bd=d;best=o}}
         if(!best)for(const s of shapes)if(s.hp>0){const d=Math.hypot(s.x-k.x,s.y-k.y);if(d<bd){bd=d;best=s}}
         if(best){k.stT=2;bolts.push({pts:[[k.x,k.y],[best.x,best.y]],t:.12});if(best.kind==='tank')damage(best,bdmg(k)*3,k);else hitShape(best,bdmg(k)*3,k)}else k.stT=.3}}
@@ -1744,6 +1838,7 @@ function tankGame(st,a,mode,opt={}){
       else if(ef==='mark'){if(o.kind==='tank')o.mark=4}};
     for(const b of bullets){
       let tf=1;for(const wl of wells)if(wl.type==='warp'&&wl.team!==b.team&&(b.x-wl.x)**2+(b.y-wl.y)**2<wl.r*wl.r){tf=.3;break}
+      if(sand&&b.dmg>=500&&!b.flame&&fx.length<2500&&Math.random()<.2)fx.push({x:b.x,y:b.y,vx:(Math.random()-.5)*40,vy:(Math.random()-.5)*40,life:.35,t:0,col:'#fef08a'});
       if(b.eff==='wave'){b.ph+=dt*9*tf;const an=b.a0+Math.sin(b.ph)*.7;b.vx=Math.cos(an)*b.sp;b.vy=Math.sin(an)*b.sp}
       if(b.eff==='boomerang'){
         if(!b.back&&b.t>.55){b.back=1;b.hits=null;b.pierce=6}
@@ -1832,6 +1927,7 @@ function tankGame(st,a,mode,opt={}){
     tanks=tanks.filter(k=>!((k.boss||k.decoy)&&k.dead)&&!(k.decoy&&t>k.decoy));
     rings.forEach(g=>g.t-=dt);rings=rings.filter(g=>g.t>0);
     bullets=bullets.filter(b=>b.t<=b.life&&b.x>-50&&b.y>-50&&b.x<WW+50&&b.y<WH+50);
+    for(const k of tanks)k.bn=0;for(const b of bullets)if(b.owner&&b.owner.kind==='tank')b.owner.bn=(b.owner.bn||0)+1;
     // bodies
     for(const k of tanks){
       if(k.dead)continue;const r=R(k);
@@ -1897,7 +1993,7 @@ function tankGame(st,a,mode,opt={}){
     x.stroke();
     if(walls.length){x.fillStyle='#232c4a';x.strokeStyle='#3d4a78';x.lineWidth=3;for(const w of walls){if(w.x>cx+vw||w.x+w.w<cx-vw||w.y>cy+vh||w.y+w.h<cy-vh)continue;x.fillRect(w.x,w.y,w.w,w.h);x.strokeRect(w.x,w.y,w.w,w.h)}}
     if(sand){x.fillStyle='rgba(250,204,21,.035)';x.beginPath();x.arc(ARENA.x,ARENA.y,ARENA.r,0,7);x.fill();x.strokeStyle='rgba(250,204,21,.35)';x.lineWidth=6;x.setLineDash([30,20]);x.stroke();x.setLineDash([]);
-      x.fillStyle='rgba(250,204,21,.35)';x.font=`400 60px "Rubik Mono One",${FONT}`;x.textAlign='center';x.fillText('BOSS ARENA',ARENA.x,ARENA.y-ARENA.r+90)}
+      x.fillStyle='rgba(250,204,21,.35)';x.font=`400 60px "Rubik Mono One",${FONT}`;x.textAlign='center';x.fillText('BOSS ARENA',ARENA.x,ARENA.y-ARENA.r+90);x.font=`400 34px "Rubik Mono One",${FONT}`;x.fillText(AFXN[AFX],ARENA.x,ARENA.y-ARENA.r+140);drawArenaFx()}
     if(sand)drawModeWorld();
     for(const p of portals){if(!on(p.x,p.y,60))continue;x.strokeStyle=p.c;x.fillStyle='rgba(15,21,40,.85)';x.lineWidth=5;x.beginPath();x.arc(p.x,p.y,40,0,7);x.fill();x.stroke();
       x.lineWidth=3;x.setLineDash([8,8]);x.beginPath();x.arc(p.x,p.y,28,t*3,t*3+6.28);x.stroke();x.setLineDash([])}
@@ -1911,8 +2007,12 @@ function tankGame(st,a,mode,opt={}){
       if(s.type==='relic'||s.type==='comet'||s.type==='orb'||s.type==='shard'||s.type==='vault'||s.type==='volatile'){x.strokeStyle=s.type==='vault'?'#fbbf24':sc0;x.globalAlpha=.35+.25*Math.sin(t*(s.type==='volatile'?9:5));x.lineWidth=4;x.beginPath();x.arc(s.x,s.y,s.r+10,0,7);x.stroke();x.globalAlpha=1}
       if(s.still||s.type==='hunter'){x.save();x.translate(s.x,s.y);x.rotate(s.rot);x.fillStyle='#8b93a7';x.strokeStyle='#5d6578';x.lineWidth=3;x.fillRect(0,-9,s.r+14,18);x.strokeRect(0,-9,s.r+14,18);x.restore()}
       if(S.minRank){x.strokeStyle=S.rainbow?`hsl(${(t*80)%360} 90% 70%)`:S.col;x.globalAlpha=.3+.2*Math.sin(t*3);x.lineWidth=6;x.beginPath();x.arc(s.x,s.y,s.r+14,0,7);x.stroke();x.globalAlpha=1}
-      if(S.star||S.rainbow){x.save();x.translate(s.x,s.y);x.rotate(s.rot);x.beginPath();const pts=S.star?S.n*2:S.n;for(let i=0;i<pts;i++){const an=i/pts*6.283,rr=S.star&&i%2?s.r*.55:s.r;x.lineTo(Math.cos(an)*rr,Math.sin(an)*rr)}x.closePath();
-        x.fillStyle=s.hit>0?'#ffffff':S.rainbow?`hsl(${(t*80+s.rot*40)%360} 85% 68%)`:S.col;x.fill();x.strokeStyle='rgba(0,0,0,.35)';x.lineWidth=3;x.stroke();x.restore()}
+      if(S.star||S.rainbow||S.dark){
+        const gon=(rad,rot,fill)=>{x.save();x.translate(s.x,s.y);x.rotate(rot);x.beginPath();const pts=S.star?S.n*2:S.n;for(let i=0;i<pts;i++){const an=i/pts*6.283,rr=S.star&&i%2?rad*(S.inner||.55):rad;x.lineTo(Math.cos(an)*rr,Math.sin(an)*rr)}x.closePath();
+          x.fillStyle=s.hit>0?'#ffffff':fill;x.fill();x.strokeStyle=S.rim||'rgba(0,0,0,.35)';x.lineWidth=S.rim?6:3;x.stroke();x.restore()};
+        gon(s.r,s.rot,S.rainbow?`hsl(${(t*80+s.rot*40)%360} 85% 68%)`:S.col);
+        if(S.double)gon(s.r*.58,-s.rot*1.6,S.rainbow?`hsl(${(t*80+180)%360} 85% 72%)`:'#fdf2f8');
+        if(S.dark&&Math.random()<.3)fx.push({x:s.x+(Math.random()-.5)*s.r*2,y:s.y+(Math.random()-.5)*s.r*2,vx:0,vy:-20,life:.8,t:0,col:'#a855f7'})}
       else TK.poly(x,s.x,s.y,s.r,S.n,s.still?0:s.rot,sc0,s.hit>0);
       const mx0=s.max||S.hp;if(s.hp<mx0){x.fillStyle='rgba(0,0,0,.5)';x.fillRect(s.x-s.r,s.y+s.r+6,s.r*2,4);x.fillStyle='#86efac';x.fillRect(s.x-s.r,s.y+s.r+6,s.r*2*s.hp/mx0,4)}}
     for(const cc of cores){if(!on(cc.x,cc.y,cc.r+60))continue;const cl=cc.team===1?BLUE:RED;
@@ -1920,6 +2020,9 @@ function tankGame(st,a,mode,opt={}){
       TK.poly(x,cc.x,cc.y,cc.r,6,0,cl);TK.poly(x,cc.x,cc.y,cc.r*.55,6,0,'#0f1528');
       x.fillStyle='rgba(0,0,0,.5)';x.fillRect(cc.x-70,cc.y-cc.r-22,140,8);x.fillStyle=cl;x.fillRect(cc.x-70,cc.y-cc.r-22,140*Math.max(0,cc.hp)/cc.max,8)}
     for(const b of bullets){if(!on(b.x,b.y,b.r))continue;
+      // heavy hitters glow: 60+ damage gets a halo, 180+ an ember glow, 500+ a white-hot core
+      if(sand&&b.dmg>=60&&!b.flame){x.strokeStyle=b.dmg>=500?'rgba(255,255,255,.75)':b.dmg>=180?'rgba(253,186,116,.6)':'rgba(255,255,255,.35)';x.lineWidth=b.dmg>=500?4:2.5;x.beginPath();x.arc(b.x,b.y,b.r+4,0,7);x.stroke();
+        if(b.dmg>=180){x.globalAlpha=.25;x.fillStyle=b.dmg>=500?'#fef9c3':'#fb923c';x.beginPath();x.arc(b.x,b.y,b.r*1.9,0,7);x.fill();x.globalAlpha=1}}
       if(b.flame){const f=Math.max(0,1-b.t/b.life);x.globalAlpha=f*.85;x.fillStyle=b.team===me.team?'#f97316':'#ef4444';x.beginPath();x.arc(b.x,b.y,b.r,0,7);x.fill();x.globalAlpha=f;x.fillStyle='#fde047';x.beginPath();x.arc(b.x,b.y,b.r*.5,0,7);x.fill();x.globalAlpha=1;continue}
       if(b.star){x.save();x.translate(b.x,b.y);x.rotate(b.t*6);x.beginPath();for(let i=0;i<10;i++){const an=i*Math.PI/5,rr=i%2?b.r*.5:b.r*1.3;x.lineTo(Math.cos(an)*rr,Math.sin(an)*rr)}x.closePath();x.fillStyle=tcol(b.team);x.fill();x.fillStyle='#fef9c3';x.beginPath();x.arc(0,0,b.r*.35,0,7);x.fill();x.restore();continue}
       x.fillStyle=b.owner&&b.owner.kind==='core'?(b.team===me.team?BLUE:RED):tcol(b.team);x.strokeStyle='rgba(0,0,0,.35)';x.lineWidth=2;x.beginPath();x.arc(b.x,b.y,b.r,0,7);x.fill();x.stroke();if(b.crit){x.strokeStyle='#fde047';x.lineWidth=2;x.beginPath();x.arc(b.x,b.y,b.r+3,0,7);x.stroke()}if(b.eff||b.fric){x.fillStyle=b.fric?'#e2e8f0':EFC[b.eff];x.beginPath();x.arc(b.x,b.y,b.r*.5,0,7);x.fill()}}
@@ -1931,8 +2034,10 @@ function tankGame(st,a,mode,opt={}){
       if(k._orbs){x.fillStyle='#e0f2fe';x.strokeStyle=col(k);x.lineWidth=3;for(const p of k._orbs){x.beginPath();x.arc(p[0],p[1],k._orbR||11,0,7);x.fill();x.stroke()}}
       const KA=TK.CLS[k.cls].aura;
       if(KA){const ac={heal:'134,239,172',drain:'192,132,252',burn:'249,115,22',chill:'186,230,253',magnet:'148,163,184'}[KA.kind];x.strokeStyle=`rgba(${ac},.4)`;x.fillStyle=`rgba(${ac},.06)`;x.lineWidth=3;if(KA.kind!=='heal')x.setLineDash([10,8]);x.beginPath();x.arc(k.x,k.y,KA.r,0,7);x.fill();x.stroke();x.setLineDash([])}
-      if(k.beams&&k.beams.length){x.lineCap='round';x.beginPath();for(const[sx,sy,ca,sa,bl]of k.beams){x.moveTo(sx,sy);x.lineTo(sx+ca*bl,sy+sa*bl)}
-        const bp=sv(k,7);x.strokeStyle=(TK.CLS[k.cls].beam||{}).col||'rgba(240,171,252,.75)';x.lineWidth=10+bp*4;x.stroke();x.strokeStyle='#fff';x.lineWidth=3+bp;x.stroke();x.lineCap='butt'}
+      if(k.beams&&k.beams.length){const brk=k.boss?(k.btier||1):rankOf(k);x.lineCap='round';x.beginPath();for(const segs of k.beams)for(const [a1,b1,a2,b2] of segs){x.moveTo(a1,b1);x.lineTo(a2,b2)}
+        const bw=Math.min(36,sv(k,7)*1.4);
+        if(brk>=4){x.strokeStyle='rgba(251,146,60,.3)';x.lineWidth=20+bw*1.4+brk*.4;x.stroke()}
+        x.strokeStyle=brk>=25?`hsla(${(t*140)%360},90%,70%,.85)`:(TK.CLS[k.cls].beam||{}).col||'rgba(240,171,252,.75)';x.lineWidth=10+bw+brk*.2;x.stroke();x.strokeStyle='#fff';x.lineWidth=3+bw*.25;x.stroke();x.lineCap='butt'}
       x.globalAlpha=k.cloaked?(k===me?.35:.1):1;
       if(t<k.safe){x.strokeStyle='rgba(255,255,255,.35)';x.lineWidth=3;x.setLineDash([6,6]);x.beginPath();x.arc(k.x,k.y,r+12,0,7);x.stroke();x.setLineDash([])}
       if(k.slow>0){x.strokeStyle='rgba(165,243,252,.8)';x.lineWidth=4;x.beginPath();x.arc(k.x,k.y,r+7,0,7);x.stroke()}
@@ -1943,6 +2048,8 @@ function tankGame(st,a,mode,opt={}){
       if(k.stun>0){x.strokeStyle='#fef08a';x.lineWidth=3;x.setLineDash([4,6]);x.beginPath();x.arc(k.x,k.y,r+10,t*6,t*6+6.28);x.stroke();x.setLineDash([])}
       if(k.mark>0){x.strokeStyle='#f87171';x.lineWidth=2.5;x.beginPath();x.arc(k.x,k.y,r+16,0,7);x.moveTo(k.x-r-24,k.y);x.lineTo(k.x-r-8,k.y);x.moveTo(k.x+r+8,k.y);x.lineTo(k.x+r+24,k.y);x.moveTo(k.x,k.y-r-24);x.lineTo(k.x,k.y-r-8);x.moveTo(k.x,k.y+r+8);x.lineTo(k.x,k.y+r+24);x.stroke()}
       TK.drawTank(x,k.x,k.y,k.a,r,k.burn>0&&Math.random()<.3?'#fb923c':k.pT>0&&Math.random()<.3?'#a3e635':col(k),barrels(k));
+      if(sand&&!k.boss)rankFx(k,r);
+      if(hasP(k,'shield')&&k.shieldHp>1){x.strokeStyle=`rgba(125,211,252,${.25+.5*k.shieldHp/(maxhp(k)*.3)})`;x.lineWidth=4;x.beginPath();x.arc(k.x,k.y,r+10,0,7);x.stroke()}
       const mh=maxhp(k);if(k.hp<mh){x.fillStyle='rgba(0,0,0,.5)';x.fillRect(k.x-r,k.y+r+8,r*2,5);x.fillStyle='#86efac';x.fillRect(k.x-r,k.y+r+8,r*2*Math.max(0,k.hp)/mh,5)}
       x.globalAlpha=1;
       if(k!==me&&!k.cloaked){x.font=`700 13px ${FONT}`;x.textAlign='center';x.fillStyle='#e2e8f0';x.fillText(k.boss?k.name.toUpperCase():`${k.name} · ${sand?TK.CLS[k.cls].name:k.level}`,k.x,k.y-r-10)}}
@@ -2005,7 +2112,7 @@ start(st,a){tankGame(st,a,'siege')}});
 
 /* ---------- Tank Overdrive ---------- */
 reg({id:'overdrive',title:'Tank Overdrive',kind:'Tanks',color:'#facc15',unit:'',fresh:true,
-how:'Pick a mode first: <b>Free for all</b>, <b>2 Teams</b>, <b>4 Teams</b>, <b>Boss fight</b>, <b>Domination</b> (hold zones), <b>Last Tank Standing</b> (shrinking zone, one life) or <b>King of the Hill</b>. Then pick a 5,000 by 5,000 map: <b>Open Field</b>, <b>Labyrinth</b> (a giant maze), <b>Frontier</b> (maze, plain, pillars and corridors in one), <b>Pillar Field</b> or <b>Fortress</b>. Walls block tanks and bullets; bouncing bullets ricochet off them. Bosses come in thirty tiers and only ever appear in the <b>boss arena</b>, the big open circle in the middle of every map, and they stay inside it. The higher the tier, the bigger the boss: the tier-30 Eternals fill about a quarter of the arena. Boss fight climbs one boss tier per wave. Like the tanks, bosses; higher tiers are tougher and hit harder. Boss fight climbs one boss tier every two waves, and in other modes bosses arrive up to one tier above your own. Tiers 1-5: the <b>Warden</b> (spiral bullets), <b>Mothership</b> (drone swarms), <b>Juggernaut</b> (charges behind shields), <b>Arcanist</b> (lightning and black holes), <b>Colossus</b> (huge, knocks you back with quakes), <b>Phantom Lord</b> (blinks around firing homing shots), <b>Hive Queen</b> (40 drones and poison), <b>Storm Titan</b> (lightning and reflects bullets), <b>Necrolord</b> (draining aura and summoned thralls), <b>Inferno Wyrm</b> (fire breath and burning aura), <b>Frost Giant</b> (freezing aura and frost novas), <b>Void Maw</b> (gravity shots, black holes, shields), <b>Prism Colossus</b> (six spinning lasers), <b>Plague Mother</b> (poison and swarms) and <b>Mirror Knight</b> (front shield, reflects bullets, homing shots). Tiers 6-9: <b>Hydra Sovereign</b>, <b>Thunder Colossus</b>, <b>Abyss Leviathan</b>, <b>Starforge</b>, <b>Doom Engine</b>, <b>Night Empress</b>, <b>World Eater</b> and <b>Chrono Tyrant</b>. Tiers 10-14: <b>Void Sovereign</b>, <b>Inferno Titan</b>, <b>Storm Emperor</b>, <b>Omega Machine</b> and <b>Astral Dragon</b>. Tiers 15-29: generated titans, leviathans, archons and more. Tier 30, the highest: the Eternals (<b>The Eternal</b>, <b>Eternal Sovereign</b> and <b>Eternal Wyrm</b>), which uses every kind of weapon and casts a random power every few seconds. <b>Relics</b> (glowing hexagons that run from you) give whoever destroys them a <b>permanent buff</b> for the match: red +10% damage, green +15% health, blue +8% speed, purple +10% reload, gold +25% regen. A rare <b>comet</b> raises every buff at once. Watch out for <b>crasher</b> packs that chase you and <b>sentries</b> that guard their spot. More to find: green <b>health orbs</b> (heal half), <b>vaults</b> (tough, give two relic buffs), red <b>volatile crystals</b> (explode and hurt everyone nearby), <b>hunter drones</b> (chase whoever is leading), <b>star shards</b> (run away, worth 3,000 XP toward your next tier) and a pair of <b>portals</b> that teleport you between them. A <b>golden pentagon</b> also appears in the center now and then. They take a group to bring down, and every tank that hurts them shares the XP. You start fully leveled and upgrades are free: click a stat or press keys <b>1-8</b> (hold <b>Shift</b> for +10). <b>Tiers:</b> the tanks you can switch between freely are tier 1. Earn XP to unlock tier 2 (4,000 XP), 3 (12,000), 4 (30,000), 5 (60,000), 6 (110,000), 7 (180,000), 8 (280,000), 9 (420,000), 10 (600,000), 11 (850,000), 12 (1.2M), 13 (1.7M), 14 (2.4M), 15 (3.3M), and on up to tier 30 (about 170M XP; each tier needs 30% more than the last). Laser tanks (Prism, Spectrum and every beam tank) do not grow extra barrels: each Extra barrels point makes their beam stronger (+60% damage), wider and longer instead. <b>Tier-locked polygons</b> start appearing once any tank in the match reaches their tier: tridecagons at tier 3 (15,000 XP), tetradecagons at 5, hexadecagons at 7, icosagons at 9, star polygons at 12 and rainbow prismagons at 15 (150,000 XP). Press <b>T</b> or the Tier tree button to browse the upgrade tree with animated previews (the game pauses). The all-branches view shows every tank a starting tank can ever become, up to tier 30, with lines between each tank and its choices; click any tank to highlight every path through it, or switch to the one-path view, and <b>M</b> to turn on auto-max, which keeps every stat at its limit. Every tank offers 5 choices for the next tier, and many tanks share choices. Each tier adds +5 to every stat limit and +1 extra barrel (tier 1: 15 and 4; tier 30: 160 and 33). There are 12 stats: the classic 7, Extra barrels, <b>Bullet range</b>, <b>Penetration</b> (bullets pass through more targets), <b>Armor</b> (up to 60% less damage) and <b>Power recharge</b> (faster Q), on keys 1-9, 0, - and =. The more XP you earn in a life, the <b>bigger</b> your tank grows, with more damage and health (with no upper limit; shown as POWER on the bottom bar). Shapes now go all the way up to <b>12 sides</b>: hexagons (300 XP), heptagons (700), octagons (1,500), nonagons (2,800), decagons (4,500), hendecagons (7,000) and dodecagons (10,000). The big ones are rare and gather near the center. The upgrade tiers hold 18 styles, including trappers, drone hybrids, artillery, necromancers, shield guardians, astral star tanks, whirlwinds and flame tanks. Every flame tank shoots real fire (short, spreading flames that pass through targets and burn them), and whirlwind tanks send their shots spiralling out around them, and higher-tier tanks hit harder and have more health. The bar at the bottom shows your progress to the next tier; "Back to tier 1" keeps your XP. You can switch to any of the 117 tier-1 tank types (newest: Whirlwind, Cyclone, Flamethrower, Blaze, Starcaller, Nebula, Constellation, Archmage, Runesmith, Hexblade, Howitzer, Bombardier, Railcannon) at any moment. <b>Every tank has a Q power</b> (its name and cooldown show on the Q button) and a <b>passive</b> (shown under the upgrade buttons): Thorns, Lifesteal, Adrenaline, Second wind, Bounty, Regenerator, Evasion, Momentum, Critical, Iron skin, Berserk, Static, Scavenger, Giant slayer or Ghost shot. Newest tanks: Vanguard (front shield blocks bullets), Gambler, Vampire (<b>Q</b> blood burst), Phoenix, Specter, Rhino, Bounty Hunter, Storm Knight, Survivor, Scrapper, Duelist, Slayer. New Q powers include Volley (5 instant bursts), Mend (heal half and cleanse), Haste, Minefield, Smoke (go invisible), Drone surge, Mark all, Pull, Focus (triple beam damage), Ignite, Plague, Mega shell and Swap (trade places with your farthest drone). Newest tanks: Juggler, Gatling, Cannoneer, Puppeteer, Paladin, Sky Fortress, Wisp, Lich, Dragon, Arbalest, Tesla. Newest: Beekeeper (<b>Q</b> bee swarm), Sapper (drops mines as it drives), Berserker (<b>Q</b> rage: double fire rate), Impaler (shots pierce 10 targets), Blunderbuss (8-pellet shotgun), Chronoshift (<b>Q</b> rewinds you 3 seconds), Magnet (pulls shapes and enemies in), Thunderhead (<b>Q</b> storm cloud), Frostbite (<b>Q</b> frost nova freezes everyone near you), Pulsar (damage pulses), Overwatch (sniper with gun drones). Newest: Hydra and Elementalist (a different magic bullet from each barrel), Mortar (long-range explosive shells), Lancer (<b>Q</b> charge with a spike that hits 3x harder while charging), Bastion (<b>Q</b> 3-second shield), Wildcard (every shot gets a random power), Spectrum (three beams), Reaper (heals 40% on every kill), Mirror (<b>Q</b> bounces enemy bullets back), Ninja (invisible boomerang thrower), Inferno (burning aura), Glacier (freezing aura). Special bullets: Bombard (explode), Arc Gunner (lightning jumps), Venom (stacking poison), Graviton (pulls enemies in), Boomer (boomerangs), Stunner (freezes tanks), Satellite (bullets orbit you), Medic (heals teammates it hits), Hammer (knockback), Serpent (wavy, piercing), Tracker (marked targets take 50% more damage). The purple-outlined ones have powers: self-aiming drones (Hivemind, Swarmer, Gunship, Conjurer), turrets you plant (Nest), magic shots (Seeker homing, Splitter, Frost Mage slows, Pyromancer burns, Warlock heals you, Ricochet bounces and pierces), mines (Trapper), a laser beam (Prism), chain lightning (Stormcaller), orbiting shields (Aegis), a healing aura for you and your team (Cleric), a draining aura (Wraith), invisibility after a second without firing (Shade), and <b>Q</b> powers: Phantom blinks, Singularity drops a black hole, Mirage sends out decoys, Chrono slows time in a bubble, Barrage fires a ring of homing rockets, and Quake knocks everything back. Computer tanks keep upgrading toward the same caps, so keep building. Drive with <b>WASD</b>, aim with the <b>mouse</b>, fire with <b>click</b> or <b>Space</b>, and press <b>E</b> for auto-fire.',
+how:'Pick a mode first: <b>Free for all</b>, <b>2 Teams</b>, <b>4 Teams</b>, <b>Boss fight</b>, <b>Domination</b> (hold zones), <b>Last Tank Standing</b> (shrinking zone, one life) or <b>King of the Hill</b>. Then pick a 5,000 by 5,000 map: <b>Open Field</b>, <b>Labyrinth</b> (a giant maze), <b>Frontier</b> (maze, plain, pillars and corridors in one), <b>Pillar Field</b> or <b>Fortress</b>. Walls block tanks and bullets; bouncing bullets ricochet off them. Bosses come in thirty tiers and only ever appear in the <b>boss arena</b>, the big open circle in the middle of every map, and they stay inside it. The higher the tier, the bigger the boss: the tier-30 Eternals fill about a quarter of the arena. Boss fight climbs one boss tier per wave. Like the tanks, bosses; higher tiers are tougher and hit harder. Boss fight climbs one boss tier every two waves, and in other modes bosses arrive up to one tier above your own. Tiers 1-5: the <b>Warden</b> (spiral bullets), <b>Mothership</b> (drone swarms), <b>Juggernaut</b> (charges behind shields), <b>Arcanist</b> (lightning and black holes), <b>Colossus</b> (huge, knocks you back with quakes), <b>Phantom Lord</b> (blinks around firing homing shots), <b>Hive Queen</b> (40 drones and poison), <b>Storm Titan</b> (lightning and reflects bullets), <b>Necrolord</b> (draining aura and summoned thralls), <b>Inferno Wyrm</b> (fire breath and burning aura), <b>Frost Giant</b> (freezing aura and frost novas), <b>Void Maw</b> (gravity shots, black holes, shields), <b>Prism Colossus</b> (six spinning lasers), <b>Plague Mother</b> (poison and swarms) and <b>Mirror Knight</b> (front shield, reflects bullets, homing shots). Tiers 6-9: <b>Hydra Sovereign</b>, <b>Thunder Colossus</b>, <b>Abyss Leviathan</b>, <b>Starforge</b>, <b>Doom Engine</b>, <b>Night Empress</b>, <b>World Eater</b> and <b>Chrono Tyrant</b>. Tiers 10-14: <b>Void Sovereign</b>, <b>Inferno Titan</b>, <b>Storm Emperor</b>, <b>Omega Machine</b> and <b>Astral Dragon</b>. Tiers 15-29: generated titans, leviathans, archons and more. Tier 30, the highest: the Eternals (<b>The Eternal</b>, <b>Eternal Sovereign</b> and <b>Eternal Wyrm</b>), which uses every kind of weapon and casts a random power every few seconds. <b>Relics</b> (glowing hexagons that run from you) give whoever destroys them a <b>permanent buff</b> for the match: red +10% damage, green +15% health, blue +8% speed, purple +10% reload, gold +25% regen. A rare <b>comet</b> raises every buff at once. Watch out for <b>crasher</b> packs that chase you and <b>sentries</b> that guard their spot. More to find: green <b>health orbs</b> (heal half), <b>vaults</b> (tough, give two relic buffs), red <b>volatile crystals</b> (explode and hurt everyone nearby), <b>hunter drones</b> (chase whoever is leading), <b>star shards</b> (run away, worth 3,000 XP toward your next tier) and a pair of <b>portals</b> that teleport you between them. A <b>golden pentagon</b> also appears in the center now and then. They take a group to bring down, and every tank that hurts them shares the XP. You start fully leveled and upgrades are free: click a stat or press keys <b>1-8</b> (hold <b>Shift</b> for +10). <b>Tiers:</b> the tanks you can switch between freely are tier 1. Earn XP to unlock tier 2 (4,000 XP), 3 (12,000), 4 (30,000), 5 (60,000), 6 (110,000), 7 (180,000), 8 (280,000), 9 (420,000), 10 (600,000), 11 (850,000), 12 (1.2M), 13 (1.7M), 14 (2.4M), 15 (3.3M), and on up to tier 30 (about 170M XP; each tier needs 30% more than the last). Every laser tank fires exactly one laser, and Extra barrels points make it stronger (about x2.9 damage at 4 points, rising more slowly after that), wider and longer instead of adding barrels. Higher tiers add laser effects and damage: sparks (tier 2), burning (4), a chain spark (6), bouncing off walls (8, twice at 12), slowing (10), piercing a second target (15), blasts (20) and prismatic colors (25). Tanks also gain looks as they rank up: a glow ring (3), orbiting sparks (6), a glowing trail (10), a crown (15), a pulsing ring (20), rainbow colors (25) and crackling lightning (30). Bullets that hit for 60 or more glow, 180 or more burn with embers, and 500 or more leave a white-hot spark trail. <b>Perks:</b> at tiers 5, 10, 15, 20, 25 and 30 you pick one of three perks for the rest of the match: Energy shield, Titan size, Overclock, Vampiric, Swift, Sharpshooter, Phoenix, Glass cannon, Drone escort, Regeneration, Eagle eye or Spiked armor. Each map arena has its own hazard that hurts players but not bosses: lightning storms (Open Field), lava pits (Labyrinth), a gravity well (Frontier), deep frost (Pillar Field) and a whirlwind (Fortress). <b>Tier-locked polygons</b> start appearing once any tank in the match reaches their tier: tridecagons at tier 3 (15,000 XP), tetradecagons at 5, hexadecagons at 7, icosagons at 9, star polygons at 12 and rainbow prismagons at 15 (150,000 XP), then crystal stars (18), sun polygons (20), void polygons (22), nova stars (25), celestial stars (28) and, at tier 30, the 64-sided Omnigon (3,000,000 XP). Press <b>T</b> or the Tier tree button to browse the upgrade tree with animated previews (the game pauses). The all-branches view shows every tank a starting tank can ever become, up to tier 30, with lines between each tank and its choices; click any tank to highlight every path through it, or switch to the one-path view, and <b>M</b> to turn on auto-max, which keeps every stat at its limit. Every tank offers 5 choices for the next tier, and many tanks share choices. Each tier adds +5 to every stat limit and +1 extra barrel (tier 1: 15 and 4; tier 30: 160 and 33). There are 12 stats: the classic 7, Extra barrels, <b>Bullet range</b>, <b>Penetration</b> (bullets pass through more targets), <b>Armor</b> (up to 60% less damage) and <b>Power recharge</b> (faster Q), on keys 1-9, 0, - and =. The more XP you earn in a life, the <b>bigger</b> your tank grows, with more damage and health (with no upper limit; shown as POWER on the bottom bar). Shapes now go all the way up to <b>12 sides</b>: hexagons (300 XP), heptagons (700), octagons (1,500), nonagons (2,800), decagons (4,500), hendecagons (7,000) and dodecagons (10,000). The big ones are rare and gather near the center. The upgrade tiers hold 18 styles, including trappers, drone hybrids, artillery, necromancers, shield guardians, astral star tanks, whirlwinds and flame tanks. Every flame tank shoots real fire (short, spreading flames that pass through targets and burn them), and whirlwind tanks send their shots spiralling out around them, and higher-tier tanks hit harder and have more health. The bar at the bottom shows your progress to the next tier; "Back to tier 1" keeps your XP. You can switch to any of the 117 tier-1 tank types (newest: Whirlwind, Cyclone, Flamethrower, Blaze, Starcaller, Nebula, Constellation, Archmage, Runesmith, Hexblade, Howitzer, Bombardier, Railcannon) at any moment. <b>Every tank has a Q power</b> (its name and cooldown show on the Q button) and a <b>passive</b> (shown under the upgrade buttons): Thorns, Lifesteal, Adrenaline, Second wind, Bounty, Regenerator, Evasion, Momentum, Critical, Iron skin, Berserk, Static, Scavenger, Giant slayer or Ghost shot. Newest tanks: Vanguard (front shield blocks bullets), Gambler, Vampire (<b>Q</b> blood burst), Phoenix, Specter, Rhino, Bounty Hunter, Storm Knight, Survivor, Scrapper, Duelist, Slayer. New Q powers include Volley (5 instant bursts), Mend (heal half and cleanse), Haste, Minefield, Smoke (go invisible), Drone surge, Mark all, Pull, Focus (triple beam damage), Ignite, Plague, Mega shell and Swap (trade places with your farthest drone). Newest tanks: Juggler, Gatling, Cannoneer, Puppeteer, Paladin, Sky Fortress, Wisp, Lich, Dragon, Arbalest, Tesla. Newest: Beekeeper (<b>Q</b> bee swarm), Sapper (drops mines as it drives), Berserker (<b>Q</b> rage: double fire rate), Impaler (shots pierce 10 targets), Blunderbuss (8-pellet shotgun), Chronoshift (<b>Q</b> rewinds you 3 seconds), Magnet (pulls shapes and enemies in), Thunderhead (<b>Q</b> storm cloud), Frostbite (<b>Q</b> frost nova freezes everyone near you), Pulsar (damage pulses), Overwatch (sniper with gun drones). Newest: Hydra and Elementalist (a different magic bullet from each barrel), Mortar (long-range explosive shells), Lancer (<b>Q</b> charge with a spike that hits 3x harder while charging), Bastion (<b>Q</b> 3-second shield), Wildcard (every shot gets a random power), Spectrum (a wide beam), Reaper (heals 40% on every kill), Mirror (<b>Q</b> bounces enemy bullets back), Ninja (invisible boomerang thrower), Inferno (burning aura), Glacier (freezing aura). Special bullets: Bombard (explode), Arc Gunner (lightning jumps), Venom (stacking poison), Graviton (pulls enemies in), Boomer (boomerangs), Stunner (freezes tanks), Satellite (bullets orbit you), Medic (heals teammates it hits), Hammer (knockback), Serpent (wavy, piercing), Tracker (marked targets take 50% more damage). The purple-outlined ones have powers: self-aiming drones (Hivemind, Swarmer, Gunship, Conjurer), turrets you plant (Nest), magic shots (Seeker homing, Splitter, Frost Mage slows, Pyromancer burns, Warlock heals you, Ricochet bounces and pierces), mines (Trapper), a laser beam (Prism), chain lightning (Stormcaller), orbiting shields (Aegis), a healing aura for you and your team (Cleric), a draining aura (Wraith), invisibility after a second without firing (Shade), and <b>Q</b> powers: Phantom blinks, Singularity drops a black hole, Mirage sends out decoys, Chrono slows time in a bubble, Barrage fires a ring of homing rockets, and Quake knocks everything back. Computer tanks keep upgrading toward the same caps, so keep building. Drive with <b>WASD</b>, aim with the <b>mouse</b>, fire with <b>click</b> or <b>Space</b>, and press <b>E</b> for auto-fire.',
 thumb(x,W,H){x.fillStyle='#0f1528';x.fillRect(0,0,W,H);x.strokeStyle='#19223d';x.lineWidth=1;x.beginPath();for(let i=0;i<=W;i+=20){x.moveTo(i,0);x.lineTo(i,H)}for(let j=0;j<=H;j+=20){x.moveTo(0,j);x.lineTo(W,j)}x.stroke();
   const B=Array.from({length:11},(_,i)=>({a:(i-5)*.2,len:1.9-Math.abs(i-5)*.05,w:.5}));B.push({a:Math.PI-.45,len:1.5,w:.7},{a:Math.PI+.45,len:1.5,w:.7});
   x.fillStyle='#38bdf8';[[205,70],[215,95],[210,120],[200,48],[190,140]].forEach(([a,b])=>{x.beginPath();x.arc(a,b,4,0,7);x.fill()});
